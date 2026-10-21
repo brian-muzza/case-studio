@@ -1,0 +1,17 @@
+# Dependencias y builds
+node_modules/
+dist/
+
+# Configuración y datos de cada instalación (no se versionan)
+config.local.json
+.npmrc
+/casos/
+
+# Herramientas propias que no son parte de la plataforma
+reel/
+
+# Sistema
+.DS_Store
+*.log
+.env
+.env.*

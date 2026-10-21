@@ -1,0 +1,29 @@
+{
+  "name": "case-studio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Case Studio: arma imágenes y videos para casos de estudio (galería de Webflow y carrusel de Instagram) a partir de capturas y grabaciones de un sitio.",
+  "scripts": {
+    "dev": "node server/index.mjs",
+    "build": "vite build",
+    "start": "NODE_ENV=production node server/index.mjs",
+    "typecheck": "tsc --noEmit",
+    "cs": "node cli.mjs"
+  },
+  "dependencies": {
+    "express": "^4.22.3",
+    "playwright": "^1.64.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "sharp": "^0.35.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}
