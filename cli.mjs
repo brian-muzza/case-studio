@@ -11,10 +11,11 @@ const BASE = process.env.CS_URL || 'http://localhost:4510';
 const [cmd, ...rest] = process.argv.slice(2);
 const flags = {};
 const args = [];
+const BOOL_FLAGS = new Set(['detach', 'ancho', 'webm', 'append']); // nunca toman el argumento siguiente
 for (let i = 0; i < rest.length; i++) {
   if (rest[i].startsWith('--')) {
     const k = rest[i].slice(2);
-    const v = rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[++i] : true;
+    const v = !BOOL_FLAGS.has(k) && rest[i + 1] && !rest[i + 1].startsWith('--') ? rest[++i] : true;
     flags[k] = v;
   } else args.push(rest[i]);
 }
@@ -128,6 +129,14 @@ function completeRows(grilla, target) {
 
 const HELP = `Case Studio CLI (servidor en ${BASE})
 
+  Para el agente (no necesitan el servidor; salida en capturas/<sitio>/). analyze y featured corren en
+  un daemon que deja la página abierta: featured usa la misma página y las mismas refs que analyze.
+  analyze <url> [web|mobile] [--hide ".popup"] [--dpr 2]     captura completa (page.png) + page.yml con refs y cajas
+  featured <url> [web|mobile] <posición...> [--pad 24] [--ancho] [--append] [--format webp|png|jpg]
+                                         screenshot de cada sección destacada. Posición: e45 · e45+e60 (unión) · x,y,w,h
+  close [url] [web|mobile]               cierra la página de analyze; sin URL apaga el daemon
+  video <url> [web|mobile] [--detach] [--speed 420] [--fps 30] [--webm]   graba la pantalla con scroll → screen-record/
+
   list                                   casos disponibles
   status <caso>                          sets, frames y capas (con índices)
   templates                              plantillas disponibles
@@ -160,9 +169,68 @@ const BG = {
   trama: (p) => ({ type: 'image', image: p.assets.find((a) => a.role === 'photo')?.id || p.assets[0]?.id, blur: 160, imageScale: 1.4, saturation: 1.3, grain: 35, overlay: { color: '#000000', opacity: 0.1 } }),
 };
 
+// video/analyze/featured: <url> [web|mobile] … (el viewport es opcional; por defecto web).
+function urlArgs() {
+  const kind = ['web', 'mobile'].includes(args[1]) ? args[1] : 'web';
+  const extra = args.slice(['web', 'mobile'].includes(args[1]) ? 2 : 1);
+  const opts = { hide: flags.hide || '', out: flags.out ? path.resolve(flags.out) : undefined, dpr: flags.dpr ? +flags.dpr : undefined, width: flags.width ? +flags.width : undefined, height: flags.height ? +flags.height : undefined };
+  return { url: args[0], kind, extra, opts };
+}
+
 try {
   const slug = args[0];
   switch (cmd) {
+    case 'video': {
+      const { url, kind, opts } = urlArgs();
+      const agent = await import('./server/agent.mjs');
+      const dir = path.join(agent.siteDir(url, opts.out), 'screen-record');
+      if (flags.detach) {
+        // Proceso aparte: el agente sigue con analyze/featured mientras se graba.
+        const { spawn } = await import('node:child_process');
+        fs.mkdirSync(dir, { recursive: true });
+        const log = path.join(dir, `${kind}.log`);
+        const fd = fs.openSync(log, 'w');
+        const argv = process.argv.slice(2).filter((a) => a !== '--detach');
+        const child = spawn(process.execPath, [new URL(import.meta.url).pathname, ...argv], { detached: true, stdio: ['ignore', fd, fd] });
+        child.unref();
+        console.log(`Grabando en segundo plano (pid ${child.pid})\n  video: ${path.join(dir, `${kind}.mp4`)}\n  log:   ${log}  (termina con "LISTO" o "Error")`);
+        break;
+      }
+      const r = await agent.video(url, kind, { ...opts, speed: flags.speed ? +flags.speed : undefined, fps: flags.fps ? +flags.fps : undefined, keepWebm: !!flags.webm }, (m) => console.log(m));
+      console.log(`LISTO ${r.file} · ${r.width}×${r.height} · ${r.seconds.toFixed(1)} s · ${r.fps} fps`);
+      break;
+    }
+    case 'analyze': {
+      // Corre en el daemon: la página queda abierta para featured.
+      const { url, kind, opts } = urlArgs();
+      const { daemonCall } = await import('./server/agent-client.mjs');
+      const { result: r, logs } = await daemonCall('/analyze', { url, kind, opts });
+      logs.forEach((m) => console.log(m));
+      console.log(`Página ${r.page.width}×${r.page.height} px CSS · ${r.refs} refs\n  yaml:   ${r.yml}\n  imagen: ${r.png}`);
+      break;
+    }
+    case 'featured': {
+      const { url, kind, extra, opts } = urlArgs();
+      // Posiciones sueltas (e45 e60+e61 0,900,1440,900) o un array JSON ('["e45","e60+e61"]').
+      const positions = extra.length === 1 && extra[0].trim().startsWith('[') ? JSON.parse(extra[0]) : extra.flatMap((x) => (/^-?[\d.]+(,-?[\d.]+){3}$/.test(x) ? [x] : x.split(/[\s;]+/))).filter(Boolean);
+      const { daemonCall } = await import('./server/agent-client.mjs');
+      const { result: r, logs } = await daemonCall('/featured', { url, kind, positions, opts: { ...opts, pad: +(flags.pad || 0), fullWidth: !!flags.ancho, format: flags.format, append: !!flags.append } });
+      logs.forEach((m) => console.log(m));
+      r.files.forEach((f) => console.log(`${f.pos.padEnd(16)} ${f.w}×${f.h}  ${f.file}${f.refs.some((x) => x.includes('→')) ? `  (reubicado: ${f.refs.join(' ')})` : ''}`));
+      if (r.session !== 'analyze') console.log('Aviso: no se usó la página de analyze; las refs se reubicaron por rol, nombre y posición.');
+      break;
+    }
+    case 'close': {
+      // close [url] [web|mobile]: cierra esa página del daemon; sin URL, apaga el daemon.
+      const { daemonIfRunning } = await import('./server/agent-client.mjs');
+      if (!args[0]) {
+        console.log((await daemonIfRunning('/shutdown')) ? 'Daemon del agente apagado' : 'El daemon del agente no estaba corriendo');
+        break;
+      }
+      const r = await daemonIfRunning('/close', { url: args[0], kind: ['web', 'mobile'].includes(args[1]) ? args[1] : undefined });
+      console.log(r?.result.closed.length ? `Cerrada(s): ${r.result.closed.join(', ')}` : 'No había páginas abiertas para esa URL');
+      break;
+    }
     case 'list': {
       const { cases } = await api('GET', '/api/cases');
       cases.forEach((c) => console.log(`${c.slug.padEnd(20)} ${c.name.padEnd(36)} ${c.hasStudio ? `${c.assets} assets · ${c.frames} imágenes` : '—'}  ${c.url}`));

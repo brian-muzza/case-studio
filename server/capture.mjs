@@ -22,7 +22,7 @@ import { stepFrame } from './animate.mjs';
 const run = promisify(execFile);
 const MAX_SECTION = 2200;
 
-const HIDE_SCRIPT = (extra) => {
+export const HIDE_SCRIPT = (extra) => {
   const re = /cookie|consent|gdpr|onetrust|cky-|cmplz|intercom|crisp|hubspot-messages|tawk|whatsapp|chat-widget|drift|tidio|zendesk|launcher/i;
   for (const el of document.querySelectorAll('body *')) {
     const s = getComputedStyle(el);
@@ -36,7 +36,7 @@ const HIDE_SCRIPT = (extra) => {
   if (extra) for (const el of document.querySelectorAll(extra)) el.style.setProperty('display', 'none', 'important');
 };
 
-async function dismissBanners(page) {
+export async function dismissBanners(page) {
   const labels = /^(aceptar|aceptar todo|aceptar todas|accept|accept all|allow all|agree|entendido|got it|ok|de acuerdo|continuar)$/i;
   for (const b of await page.locator('button, a[role="button"], [role="button"]').all().catch(() => [])) {
     try {
@@ -50,7 +50,7 @@ async function dismissBanners(page) {
   }
 }
 
-async function autoScroll(page) {
+export async function autoScroll(page) {
   let last = -1;
   for (let i = 0; i < 80; i++) {
     await page.mouse.wheel(0, 650);
@@ -65,7 +65,7 @@ async function autoScroll(page) {
   await page.waitForTimeout(700);
 }
 
-async function open(context, url, opts, { scroll = true, clock = false } = {}) {
+export async function open(context, url, opts, { scroll = true, clock = false } = {}) {
   const page = await context.newPage();
   if (clock) await page.clock.install(); // corre normal hasta que se congele para grabar
   try {

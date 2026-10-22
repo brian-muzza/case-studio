@@ -109,6 +109,39 @@ node cli.mjs                                         # ayuda completa
 
 Referencias: los sets se indican por nombre, id o número; las imágenes como `webflow:3`; las capas por número, id o nombre. `k+=n` y `k-=n` son relativos.
 
+### CLI para el agente
+
+Comandos que no necesitan el servidor. Trabajan con una URL y un viewport (`web` 1440×900 o `mobile` 390×844; por defecto `web`) y guardan todo en `capturas/<sitio>/`:
+
+```bash
+node cli.mjs video useunbuild.com web --detach       # graba en segundo plano → screen-record/web.mp4
+node cli.mjs analyze useunbuild.com web              # web/page.png + web/page.yml
+node cli.mjs featured useunbuild.com web e126 e337 e904+e941 --ancho   # → web/featured/
+node cli.mjs close                                   # al terminar: cierra el navegador
+```
+
+`analyze` y `featured` corren en un daemon local que mantiene un Chromium abierto, con una página por URL y viewport. `analyze` deja la página abierta con su snapshot y `featured` saca los screenshots sobre esa misma página, así que las refs de `page.yml` valen tal cual. La CLI levanta el daemon la primera vez (o lo reinicia si cambió el código) y el daemon se apaga solo tras 30 minutos sin uso (`CS_AGENT_IDLE_MIN`). Escucha solo en `127.0.0.1`; su estado y su log quedan en `capturas/.agent-daemon.*`.
+
+| Comando | Qué hace |
+|---|---|
+| `analyze <url> [web\|mobile]` | Abre la página una vez y guarda la captura completa (`page.png`, a 2x en web y 3x en mobile), el árbol de accesibilidad con refs y cajas (`page.yml`) y las cajas de cada ref (`page.json`). |
+| `featured <url> [web\|mobile] <posiciones…>` | Saca un screenshot de cada sección con Playwright, sobre la página que dejó abierta `analyze`. Cada llamada reemplaza la tanda anterior; con `--append` se suman. |
+| `close [url] [web\|mobile]` | Cierra la página de esa URL (o las dos, web y mobile). Sin URL, apaga el daemon y el navegador. |
+| `video <url> [web\|mobile]` | Graba la pantalla en tiempo real con `page.screencast` mientras la página baja sola, y lo pasa a MP4 H.264. Con `--detach` corre aparte y deja un log que termina en `LISTO` o `Error`. |
+
+Posiciones de `featured`, en px CSS de la página:
+
+- `e45`: la caja del elemento con `[ref=e45]` en `page.yml`.
+- `e45+e60`: la caja que cubre a todos, por ejemplo el título y la grilla de una sección.
+- `x,y,w,h`: una caja explícita.
+- También acepta un array JSON: `'["e45","e60+e61"]'`.
+
+Las refs cambian entre una carga y otra de la página (un texto animado de más corre la numeración). Si la página de `analyze` ya no está (se cerró el daemon o se usó `close`), `featured` la abre de nuevo, toma otro snapshot y busca cada ref por su firma (rol, nombre y texto) y por su caja en `page.json`. Si la encuentra con otro número, lo avisa: `(reubicado: e338→e337)`. Si ya no existe, pide correr `analyze` de nuevo.
+
+Opciones: `--pad 24` agrega margen, `--ancho` estira el recorte a todo el ancho de la página y `--format webp|png|jpg` (por defecto `webp`; pasa a `jpg` si supera el límite de 16 383 px de WebP).
+
+Flujo para el agente: lanzar `video … --detach`, correr `analyze`, leer `page.yml` y `page.png`, elegir las refs, pedir `featured` y terminar con `close`. El video se graba mientras tanto, en su propio proceso.
+
 ### Scripts
 
 | Script | Para qué |
@@ -138,6 +171,8 @@ No publica nada: los cambios quedan sin publicar hasta que alguien los revise.
 
 Archivos de `server/`:
 
+- `agent.mjs`: comandos `analyze`, `featured` y `video` de la CLI para el agente.
+- `agent-daemon.mjs` y `agent-client.mjs`: el daemon que mantiene la página abierta entre `analyze` y `featured`, y el cliente que usa la CLI.
 - `capture.mjs`: capturas y grabación del scroll.
 - `animate.mjs`: animaciones de carga y de secciones.
 - `export.mjs`: Playwright renderiza `/?render=1&…` y ffmpeg compone los videos.
@@ -149,4 +184,6 @@ Archivos de `server/`:
 
 - Hay una sola capa de video por imagen, sin rotación ni escenario 3D: el MP4 se compone en plano.
 - La captura detecta secciones por `section`, `header` y `footer`. En sitios sin esa estructura corta la página por altura de pantalla.
-- Las páginas muy largas se capturan a 1× para no superar el límite de Chromium.
+- Las páginas muy largas se capturan a 1× para no superar el límite de Chromium. `analyze` no tiene ese límite: captura en tramos y los une.
+- `video` graba a la resolución del viewport en px CSS: `page.screencast` no graba a 2x. En mobile el video sale de 390×844.
+- `video` graba en tiempo real: si la máquina está cargada pueden aparecer algunos cuadros repetidos.
