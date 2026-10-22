@@ -15,3 +15,6 @@ reel/
 *.log
 .env
 .env.*
+
+# Salida de la CLI para el agente (analyze, featured, video)
+/capturas/
